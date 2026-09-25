@@ -8,7 +8,7 @@
  * Usage: node scripts/publish-release.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, statSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,16 +25,6 @@ const TAG = `v${VERSION}-fork.${FORK}`;
 const RELEASE_NAME = `Pomotroid fork ${VERSION} — Configurable Incremental Focus resets`;
 const NOTES = join(parent, 'release-notes.md');
 const BUNDLE = join(root, 'src-tauri', 'target', 'release', 'bundle');
-
-/**
- * Pick the single file matching `pattern` in `dir`, or `null`. Keeps the
- * installer paths working across version bumps without editing this script.
- */
-function findOne(dir, pattern) {
-  if (!existsSync(dir)) return null;
-  const hit = readdirSync(dir).find((name) => pattern.test(name));
-  return hit ? join(dir, hit) : null;
-}
 
 // --- Credential: reuse whatever Git Credential Manager already stores --------
 let token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
@@ -95,13 +85,22 @@ try {
 }
 
 // --- Collect assets ----------------------------------------------------------
+// Match on the version explicitly: the bundle directory still holds the
+// installers of earlier releases, and picking the wrong file would upload a
+// stale build without any error.
 const assets = [];
 
-const nsis = findOne(join(BUNDLE, 'nsis'), /-setup\.exe$/i);
-if (nsis) assets.push(nsis);
+const nsis = join(BUNDLE, 'nsis', `Pomotroid_${VERSION}_x64-setup.exe`);
+if (existsSync(nsis)) assets.push(nsis);
+else console.warn(`warning: NSIS installer not found: ${nsis}`);
 
-const msi = findOne(join(BUNDLE, 'msi'), /\.msi$/i);
-if (msi) assets.push(msi);
+const msi = join(BUNDLE, 'msi', `Pomotroid_${VERSION}_x64_en-US.msi`);
+if (existsSync(msi)) assets.push(msi);
+else console.warn(`warning: MSI not found: ${msi}`);
+
+if (assets.length === 0) {
+  throw new Error(`No installers for ${VERSION} under ${BUNDLE} - run "npm run tauri build" first.`);
+}
 
 const zip = join(BUNDLE, 'portable', `Pomotroid_${VERSION}_x64-portable.zip`);
 
