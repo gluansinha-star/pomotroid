@@ -1,6 +1,6 @@
 <script lang="ts">
   import { settings } from '$lib/stores/settings';
-  import { setSetting } from '$lib/ipc';
+  import { setSetting, timerResetIncrement } from '$lib/ipc';
   import SettingsToggle from '$lib/components/settings/SettingsToggle.svelte';
   import * as m from '$paraglide/messages.js';
 
@@ -112,6 +112,35 @@
 
   /** Cap slider floor: never below the base work duration. */
   let capMin = $derived(Math.max(workMins, 5));
+
+  /**
+   * Where the ladder restarts from, as configured by the two reset triggers.
+   * Both default to on, which is the behaviour of every build before the
+   * triggers became configurable.
+   */
+  let ladderHint = $derived.by(() => {
+    const onLongBreak = $settings.incremental_reset_on_long_break;
+    const daily = $settings.incremental_reset_daily;
+    if (onLongBreak && daily) return m.timer_increment_ladder_hint();
+    if (daily) return m.timer_increment_hint_daily();
+    if (onLongBreak) return m.timer_increment_hint_long_break();
+    return m.timer_increment_hint_never();
+  });
+
+  /** Transient confirmation shown after a manual ladder reset. */
+  let ladderResetDone = $state(false);
+  let ladderResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Manual reset: back to the base duration without touching round counters. */
+  async function resetLadder(): Promise<void> {
+    await timerResetIncrement();
+    ladderResetDone = true;
+    if (ladderResetTimer) clearTimeout(ladderResetTimer);
+    ladderResetTimer = setTimeout(() => {
+      ladderResetDone = false;
+      ladderResetTimer = null;
+    }, 2500);
+  }
 
   /** Commit the increment badge (minutes). */
   async function commitIncrement(raw: string | null, el: HTMLInputElement): Promise<void> {
@@ -443,6 +472,21 @@
       </div>
     </div>
 
+    <!-- Reset triggers -->
+    <SettingsToggle
+      label={m.timer_toggle_increment_reset_long_break()}
+      description={m.timer_toggle_increment_reset_long_break_desc()}
+      checked={$settings.incremental_reset_on_long_break}
+      onclick={() =>
+        toggle('incremental_reset_on_long_break', $settings.incremental_reset_on_long_break)}
+    />
+    <SettingsToggle
+      label={m.timer_toggle_increment_reset_daily()}
+      description={m.timer_toggle_increment_reset_daily_desc()}
+      checked={$settings.incremental_reset_daily}
+      onclick={() => toggle('incremental_reset_daily', $settings.incremental_reset_daily)}
+    />
+
     <!-- Ladder preview -->
     <div class="ladder">
       <span class="ladder-title">{m.timer_increment_ladder()}</span>
@@ -458,9 +502,20 @@
         <span class="ladder-arrow">…</span>
       </div>
       <span class="ladder-hint">
-        {ladderCapped ? m.timer_increment_capped() : m.timer_increment_ladder_hint()}
+        {ladderCapped ? m.timer_increment_capped() : ladderHint}
       </span>
     </div>
+
+    <!-- Manual reset -->
+    <button class="action-row" onclick={resetLadder}>
+      <span class="action-text">
+        <span class="action-label">{m.timer_increment_reset_now()}</span>
+        <span class="action-desc" class:done={ladderResetDone}>
+          {ladderResetDone ? m.timer_increment_reset_done() : m.timer_increment_reset_now_desc()}
+        </span>
+      </span>
+      <span class="action-icon" aria-hidden="true">↺</span>
+    </button>
   </div>
 </div>
 
@@ -638,5 +693,56 @@
     font-size: 0.68rem;
     font-style: italic;
     color: color-mix(in oklch, var(--color-foreground-darker) 70%, transparent);
+  }
+
+  /* ── Manual ladder reset ────────────────────────────────── */
+  .action-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 10px 20px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--color-separator);
+    cursor: pointer;
+    text-align: left;
+    gap: 16px;
+    transition: background 0.12s;
+  }
+
+  .action-row:hover {
+    background: var(--color-hover);
+  }
+
+  .action-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .action-label {
+    font-size: 0.85rem;
+    color: var(--color-foreground);
+    letter-spacing: 0.02em;
+  }
+
+  .action-desc {
+    font-size: 0.72rem;
+    color: var(--color-foreground-darker, var(--color-foreground));
+    letter-spacing: 0.02em;
+    opacity: 0.7;
+  }
+
+  .action-desc.done {
+    color: var(--color-accent);
+    opacity: 1;
+  }
+
+  .action-icon {
+    font-size: 0.95rem;
+    color: var(--color-foreground-darker, var(--color-foreground));
+    flex-shrink: 0;
   }
 </style>

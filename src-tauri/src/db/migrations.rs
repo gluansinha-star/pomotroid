@@ -100,6 +100,16 @@ const MIGRATION_7: &str = "
     INSERT INTO schema_version VALUES (7);
 ";
 
+/// Seeds the incremental-focus reset triggers for users upgrading from a build
+/// that reset the ladder at every long break unconditionally. Both default to
+/// 'true', which preserves that behaviour; turning either off lets the ladder
+/// keep climbing across cycles and/or days.
+const MIGRATION_8: &str = "
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('incremental_reset_on_long_break', 'true');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('incremental_reset_daily', 'true');
+    INSERT INTO schema_version VALUES (8);
+";
+
 /// Apply any pending migrations. Each migration is wrapped in a transaction
 /// so a partial failure leaves the database unchanged.
 pub fn run(conn: &Connection) -> Result<()> {
@@ -147,6 +157,12 @@ pub fn run(conn: &Connection) -> Result<()> {
         log::info!("[db/migrations] MIGRATION_7 complete");
     }
 
+    if version < 8 {
+        log::info!("[db/migrations] applying MIGRATION_8: seed incremental focus reset triggers");
+        conn.execute_batch(&format!("BEGIN; {MIGRATION_8} COMMIT;"))?;
+        log::info!("[db/migrations] MIGRATION_8 complete");
+    }
+
     Ok(())
 }
 
@@ -182,7 +198,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
     }
 
     #[test]

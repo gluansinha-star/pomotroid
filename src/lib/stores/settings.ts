@@ -11,6 +11,8 @@ const defaults: Settings = {
   incremental_work_enabled: false,
   time_work_increment_secs: 300,
   time_work_max_secs: 5400,
+  incremental_reset_on_long_break: true,
+  incremental_reset_daily: true,
   long_break_interval: 4,
   short_breaks_enabled: true,
   long_breaks_enabled: true,

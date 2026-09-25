@@ -8,7 +8,7 @@
  * Usage: node scripts/publish-release.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, statSync, existsSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,9 +17,24 @@ const root = join(here, '..');
 const parent = join(root, '..');
 
 const REPO = 'gluansinha-star/pomotroid';
-const TAG = 'v1.7.1-fork.1';
+/** App version — single source of truth, read from package.json. */
+const VERSION = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+/** Fork releases are tagged `<upstream-version>-fork.<n>`. */
+const FORK = 1;
+const TAG = `v${VERSION}-fork.${FORK}`;
+const RELEASE_NAME = `Pomotroid fork ${VERSION} — Configurable Incremental Focus resets`;
 const NOTES = join(parent, 'release-notes.md');
 const BUNDLE = join(root, 'src-tauri', 'target', 'release', 'bundle');
+
+/**
+ * Pick the single file matching `pattern` in `dir`, or `null`. Keeps the
+ * installer paths working across version bumps without editing this script.
+ */
+function findOne(dir, pattern) {
+  if (!existsSync(dir)) return null;
+  const hit = readdirSync(dir).find((name) => pattern.test(name));
+  return hit ? join(dir, hit) : null;
+}
 
 // --- Credential: reuse whatever Git Credential Manager already stores --------
 let token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
@@ -60,7 +75,7 @@ try {
     body: JSON.stringify({
       tag_name: TAG,
       target_commitish: 'main',
-      name: 'Pomotroid fork 1.7.1 — Incremental Focus + Better Stats',
+      name: RELEASE_NAME,
       body,
       draft: false,
       prerelease: false,
@@ -81,18 +96,14 @@ try {
 
 // --- Collect assets ----------------------------------------------------------
 const assets = [];
-const nsis = join(BUNDLE, 'nsis', 'Pomotroid_1.7.1_x64-setup.exe');
-if (existsSync(nsis)) assets.push(nsis);
 
-const msiDir = join(BUNDLE, 'msi');
-if (existsSync(msiDir)) {
-  const msi = execFileSync('powershell', ['-NoProfile', '-Command', `Get-ChildItem '${msiDir}' -Filter *.msi | Select-Object -ExpandProperty FullName`], { encoding: 'utf8' })
-    .trim();
-  if (msi) assets.push(msi.split(/\r?\n/)[0]);
-}
+const nsis = findOne(join(BUNDLE, 'nsis'), /-setup\.exe$/i);
+if (nsis) assets.push(nsis);
 
-const zip = join(BUNDLE, 'portable', 'Pomotroid_1.7.1_x64-portable.zip');
-assets.push(zip); // may not exist; handled below
+const msi = findOne(join(BUNDLE, 'msi'), /\.msi$/i);
+if (msi) assets.push(msi);
+
+const zip = join(BUNDLE, 'portable', `Pomotroid_${VERSION}_x64-portable.zip`);
 
 // Build the portable zip from the release exe if it is missing.
 if (!existsSync(zip)) {
@@ -104,6 +115,7 @@ if (!existsSync(zip)) {
     execFileSync('tar', ['-a', '-c', '-f', zip, '-C', join(root, 'src-tauri', 'target', 'release'), 'pomotroid.exe'], { stdio: 'inherit' });
   }
 }
+assets.push(zip); // may not exist; handled below
 
 // --- Upload -----------------------------------------------------------------
 const existing = new Set((release.assets ?? []).map((a) => a.name));

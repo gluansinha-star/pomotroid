@@ -34,6 +34,10 @@ export interface Settings {
   time_work_increment_secs: number;
   /** Ceiling for the escalated work duration, in seconds. */
   time_work_max_secs: number;
+  /** Restart the incremental ladder when a long break begins. */
+  incremental_reset_on_long_break: boolean;
+  /** Restart the incremental ladder when the local calendar day changes. */
+  incremental_reset_daily: boolean;
   long_break_interval: number;
   short_breaks_enabled: boolean;
   long_breaks_enabled: boolean;

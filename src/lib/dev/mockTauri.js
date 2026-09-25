@@ -33,6 +33,8 @@ const settings = {
   incremental_work_enabled: true,
   time_work_increment_secs: 300, // +5 min per completed work round
   time_work_max_secs: 1200, // capped at 20 min
+  incremental_reset_on_long_break: true,
+  incremental_reset_daily: true,
   long_break_interval: 4,
   short_breaks_enabled: true,
   long_breaks_enabled: true,
@@ -482,6 +484,13 @@ function buildInsights() {
 
 const MOCK_ROUNDS_TOTAL = settings.long_break_interval;
 
+/** Local calendar date as "YYYY-MM-DD" (mirrors SQLite's date('now','localtime')). */
+function todayKey() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const timer = {
   round_type: 'work',
   previous_round_type: '',
@@ -490,8 +499,24 @@ const timer = {
   work_round_number: 1,
   session_work_count: 1,
   work_rounds_completed: 0,
+  ladder_day: todayKey(),
   _interval: null,
 };
+
+/**
+ * Mirror of `SequenceState::check_day_rollover`: a new calendar day restarts the
+ * ladder unless the daily reset trigger is turned off.
+ */
+function checkDayRollover() {
+  const today = todayKey();
+  if (timer.ladder_day === today) return false;
+  const hadDay = timer.ladder_day !== null;
+  timer.ladder_day = today;
+  if (!hadDay || !settings.incremental_reset_daily) return false;
+  const changed = timer.work_rounds_completed !== 0;
+  timer.work_rounds_completed = 0;
+  return changed;
+}
 
 /**
  * Mirror of the Rust `SequenceState::work_duration_secs` ladder so the mock
@@ -551,12 +576,17 @@ function startTicking() {
 
 function advanceRound() {
   stopTicking();
+  const rolledOver = checkDayRollover();
+  const finishedWork = timer.round_type === 'work';
   timer.previous_round_type = timer.round_type;
 
   if (timer.round_type === 'work') {
     timer.work_rounds_completed += 1;
     if (timer.work_round_number >= MOCK_ROUNDS_TOTAL && settings.long_breaks_enabled) {
       timer.round_type = 'long-break';
+      // Long-break reset trigger: the ladder restarts with the new cycle unless
+      // the user keeps it climbing across breaks.
+      if (settings.incremental_reset_on_long_break) timer.work_rounds_completed = 0;
     } else {
       if (timer.work_round_number >= MOCK_ROUNDS_TOTAL) timer.work_round_number = 1;
       else timer.work_round_number += 1;
@@ -565,12 +595,15 @@ function advanceRound() {
   } else if (timer.round_type === 'long-break') {
     timer.round_type = 'work';
     timer.work_round_number = 1;
-    timer.work_rounds_completed = 0; // ladder restarts each cycle
     timer.session_work_count += 1;
   } else {
     timer.round_type = 'work';
     timer.session_work_count += 1;
   }
+
+  // A work round that finished just after midnight belongs to the day it
+  // started in, so it must not extend the new day's ladder.
+  if (rolledOver && finishedWork) timer.work_rounds_completed = 0;
 
   timer.elapsed_secs = 0;
   timer.is_running = false;
@@ -606,6 +639,7 @@ const commands = {
       else settings[key] = value;
     }
     emit('settings:changed', { ...settings });
+    checkDayRollover();
     emit('timer:reset', snapshot());
     return { ...settings };
   },
@@ -614,8 +648,12 @@ const commands = {
 
   themes_list: () => themes.map((t) => ({ ...t })),
 
-  timer_get_state: () => snapshot(),
+  timer_get_state: () => {
+    checkDayRollover();
+    return snapshot();
+  },
   timer_toggle: () => {
+    checkDayRollover();
     if (timer.is_running) {
       stopTicking();
       timer.is_running = false;
@@ -636,7 +674,13 @@ const commands = {
     timer.is_running = false;
     timer.work_round_number = 1;
     timer.work_rounds_completed = 0;
+    timer.ladder_day = todayKey();
     timer.session_work_count = 1;
+    emit('timer:reset', snapshot());
+  },
+  timer_reset_increment: () => {
+    timer.work_rounds_completed = 0;
+    timer.ladder_day = todayKey();
     emit('timer:reset', snapshot());
   },
   timer_restart_round: () => {
@@ -680,7 +724,7 @@ const commands = {
   window_set_visibility: () => undefined,
   open_log_dir: () => undefined,
   get_log_dir: () => '/tmp/pomotroid-logs',
-  app_version: () => '1.7.1-dev+mock',
+  app_version: () => '1.7.2-dev+mock',
   accessibility_trusted: () => true,
   tray_supported: () => false,
   check_update: () => null,

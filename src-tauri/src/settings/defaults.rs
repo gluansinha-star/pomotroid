@@ -26,6 +26,8 @@ pub const DEFAULTS: &[(&str, &str)] = &[
     ("incremental_work_enabled", "false"),
     ("time_work_increment_secs", "300"),
     ("time_work_max_secs", "5400"),
+    ("incremental_reset_on_long_break", "true"),
+    ("incremental_reset_daily", "true"),
     ("volume", "100"),
     ("websocket_enabled", "false"),
     ("websocket_port", "1314"),

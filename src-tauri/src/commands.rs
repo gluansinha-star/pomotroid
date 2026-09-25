@@ -34,6 +34,19 @@ pub fn timer_reset(timer: State<'_, TimerController>) {
     timer.reset();
 }
 
+/// Restart the incremental-focus ladder from the base work duration.
+///
+/// This is the manual reset trigger for the ladder: the round, cycle and session
+/// counters are untouched, so it can be used mid-session when the ladder has
+/// climbed past a comfortable focus length.
+#[tauri::command]
+pub fn timer_reset_increment(timer: State<'_, TimerController>, app: AppHandle) {
+    timer.reset_increment_ladder();
+    // Broadcast the new snapshot so every window re-renders the ladder caption
+    // without waiting for the next tick or round change.
+    app.emit("timer:reset", &timer.get_snapshot()).ok();
+}
+
 /// Skip the current round: fires Complete immediately and advances to the next.
 #[tauri::command]
 pub fn timer_skip(timer: State<'_, TimerController>) {
@@ -251,6 +264,9 @@ pub fn settings_reset_defaults(
     };
 
     timer.apply_settings(new_settings.clone());
+    // A factory reset also drops the incremental ladder back to the base
+    // duration, matching the slate the reseeded settings describe.
+    timer.reset_increment_ladder();
     *tray_state.countdown_mode.lock().unwrap() = new_settings.dial_countdown;
 
     // Broadcast a reset snapshot so the frontend dial and display reflect the
