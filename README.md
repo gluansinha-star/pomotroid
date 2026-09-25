@@ -272,7 +272,7 @@ This is also run automatically as part of `npm run check`.
 
 ### Development helpers
 
-Two small Node scripts were added in this fork to make working on the new features easier:
+Three small Node scripts were added in this fork to make working on the new features easier:
 
 ```bash
 # Fill the local database with ~200 days of realistic history so the stats
@@ -283,6 +283,11 @@ node scripts/seed-demo-data.mjs
 # Add any missing message keys to every locale file, falling back to the
 # English string. Existing translations are never overwritten.
 node scripts/sync-messages.mjs
+
+# Publish a Windows release to this fork, attaching the NSIS installer, the MSI
+# and a portable zip. Reuses the credential Git Credential Manager already
+# stores for github.com; reads the release body from ../release-notes.md.
+node scripts/publish-release.mjs
 ```
 
 To preview the UI in a plain browser without the Tauri shell, run `npm run dev` and open
