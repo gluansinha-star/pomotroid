@@ -62,6 +62,10 @@ Set it up in **Settings → Timer → Incremental Focus**:
 | **Add per Round**     | Minutes added after each completed focus round                  | 5 min   |
 | **Maximum Focus**     | Ceiling for the escalated duration                              | 90 min  |
 
+<div align="center">
+  <img alt="Pomotroid Timer settings showing the Incremental Focus toggle, Add per Round and Maximum Focus sliders, and the live focus ladder preview" src=".github/images/incremental-focus-settings.png" width="720px">
+</div>
+
 With the default 25-minute focus and a 5-minute increment capped at 45 minutes, the ladder runs
 **25 → 30 → 35 → 40 → 45 → 45 → …**. The settings panel renders a live preview of the ladder so you
 can see the shape before you commit to it.
@@ -91,6 +95,10 @@ to the original chart button.
 
 It is built around answering "how am I actually doing?" rather than just listing totals:
 
+<div align="center">
+  <img alt="Better Stats — momentum: today's ring against the 7-day average, streak, and week-over-week comparisons, plus 28-day and 12-week progress charts" src=".github/images/better-stats-momentum.png" width="800px">
+</div>
+
 **Momentum**
 - A progress ring comparing today against your trailing 7-day average, with a plain-language verdict
   ("3 rounds to match your average", "Average matched — keep going").
@@ -115,6 +123,10 @@ It is built around answering "how am I actually doing?" rather than just listing
   busiest weekday.
 - A round-length histogram bucketed into under 15 / 15–25 / 25–40 / 40–60 / 60+ minutes.
 
+<div align="center">
+  <img alt="Better Stats — consistency: 120-day heatmap with month/year scopes, habit strength donut, focus window, and round-length mix" src=".github/images/better-stats-consistency.png" width="800px">
+</div>
+
 **Rhythm**
 - A weekday × hour grid showing exactly when you focus, with the peak slot called out.
 - Ranked focus-by-weekday and focus-by-hour breakdowns.
@@ -122,6 +134,10 @@ It is built around answering "how am I actually doing?" rather than just listing
 **Personal bests**
 - Longest round, best day (by rounds and by focus time), best week, average round length, total
   tracked days, and longest streak.
+
+<div align="center">
+  <img alt="Better Stats — weekday by hour rhythm grid, focus by weekday and hour breakdowns, and personal bests" src=".github/images/better-stats-rhythm.png" width="800px">
+</div>
 
 Everything arrives in a single IPC call (`stats_get_insights`), so the window has no staggered
 loading. Durations are formatted the way people read them: `45m`, then `1h 30m`, and whole hours once
