@@ -11,6 +11,7 @@ import type {
   CustomAudioInfo,
   DetailedStats,
   HeatmapStats,
+  Insights,
   UpdateInfo,
 } from '$lib/types';
 
@@ -85,6 +86,9 @@ export const statsGetDetailed = () => invoke<DetailedStats>('stats_get_detailed'
 
 /** Heatmap entries + lifetime totals (All Time tab). */
 export const statsGetHeatmap = () => invoke<HeatmapStats>('stats_get_heatmap');
+
+/** Full analytics payload for the "Better Stats" window. */
+export const statsGetInsights = () => invoke<Insights>('stats_get_insights');
 
 // --- Platform commands ---
 

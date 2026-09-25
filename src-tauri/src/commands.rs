@@ -378,6 +378,20 @@ pub fn stats_get_heatmap(db: State<'_, DbState>) -> Result<HeatmapStats, String>
     })
 }
 
+/// Full analytics payload for the "Better Stats" window.
+///
+/// Returns today's activity, rolling 7/28-day summaries, week-over-week and
+/// day-over-day momentum, a 28-day trend, a 12-week rollup, all-time totals,
+/// streaks, and hourly/weekday focus profiles — all in one round-trip.
+#[tauri::command]
+pub fn stats_get_insights(db: State<'_, DbState>) -> Result<queries::Insights, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    queries::get_insights(&conn).map_err(|e| {
+        log::error!("[stats] failed to build insights: {e}");
+        e.to_string()
+    })
+}
+
 // ---------------------------------------------------------------------------
 // CMD-05 — Window commands
 // ---------------------------------------------------------------------------

@@ -90,6 +90,16 @@ const MIGRATION_6: &str = "
     INSERT INTO schema_version VALUES (6);
 ";
 
+/// Seeds the incremental-focus settings for users upgrading from a version that
+/// did not have this feature. Disabled by default so existing behaviour is
+/// preserved; the defaults match `settings::defaults::DEFAULTS`.
+const MIGRATION_7: &str = "
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('incremental_work_enabled', 'false');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('time_work_increment_secs', '300');
+    INSERT OR IGNORE INTO settings (key, value) VALUES ('time_work_max_secs', '5400');
+    INSERT INTO schema_version VALUES (7);
+";
+
 /// Apply any pending migrations. Each migration is wrapped in a transaction
 /// so a partial failure leaves the database unchanged.
 pub fn run(conn: &Connection) -> Result<()> {
@@ -131,6 +141,12 @@ pub fn run(conn: &Connection) -> Result<()> {
         log::info!("[db/migrations] MIGRATION_6 complete");
     }
 
+    if version < 7 {
+        log::info!("[db/migrations] applying MIGRATION_7: seed incremental focus settings");
+        conn.execute_batch(&format!("BEGIN; {MIGRATION_7} COMMIT;"))?;
+        log::info!("[db/migrations] MIGRATION_7 complete");
+    }
+
     Ok(())
 }
 
@@ -166,7 +182,7 @@ mod tests {
         let v: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, 7);
     }
 
     #[test]

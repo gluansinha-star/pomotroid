@@ -49,6 +49,10 @@ pub struct SequenceState {
     /// Unlike `work_round_number` this never resets at cycle boundaries,
     /// so it can be used as a session counter when long breaks are disabled.
     pub session_work_count: u32,
+    /// Work rounds finished since the current ladder began. Drives the
+    /// incremental focus mode and resets at every long-break boundary (and on
+    /// a full Reset), so each new cycle starts at the base duration again.
+    pub work_rounds_completed: u32,
 }
 
 impl SequenceState {
@@ -59,16 +63,56 @@ impl SequenceState {
             work_round_number: 1,
             work_rounds_total,
             session_work_count: 1,
+            work_rounds_completed: 0,
         }
     }
 
     /// Duration of the current round in seconds, taken from settings.
+    ///
+    /// In incremental focus mode a work round is lengthened by
+    /// `time_work_increment_secs` for every work round already completed in the
+    /// current ladder, capped at `time_work_max_secs` and never shorter than the
+    /// configured base duration. Break durations are never escalated.
     pub fn current_duration_secs(&self, settings: &Settings) -> u32 {
         match self.current_round {
-            RoundType::Work => settings.time_work_secs,
+            RoundType::Work => self.work_duration_secs(settings),
             RoundType::ShortBreak => settings.time_short_break_secs,
             RoundType::LongBreak => settings.time_long_break_secs,
         }
+    }
+
+    /// The work duration that applies to the current ladder position.
+    pub fn work_duration_secs(&self, settings: &Settings) -> u32 {
+        let base = settings.time_work_secs;
+        if !settings.incremental_work_enabled || settings.time_work_increment_secs == 0 {
+            return base;
+        }
+        let step = settings
+            .time_work_increment_secs
+            .saturating_mul(self.work_rounds_completed);
+        base.saturating_add(step).min(settings.time_work_max_secs.max(base))
+    }
+
+    /// How many increments have been applied to the work duration right now.
+    /// Used by the frontend to show the current step on the ladder.
+    pub fn work_increment_steps(&self, settings: &Settings) -> u32 {
+        if !settings.incremental_work_enabled || settings.time_work_increment_secs == 0 {
+            return 0;
+        }
+        self.work_rounds_completed
+    }
+
+    /// True when the current work duration has reached the configured ceiling
+    /// and further rounds will no longer grow.
+    pub fn work_duration_at_cap(&self, settings: &Settings) -> bool {
+        if !settings.incremental_work_enabled || settings.time_work_increment_secs == 0 {
+            return false;
+        }
+        let cap = settings.time_work_max_secs.max(settings.time_work_secs);
+        let uncapped = settings
+            .time_work_secs
+            .saturating_add(settings.time_work_increment_secs.saturating_mul(self.work_rounds_completed));
+        uncapped >= cap
     }
 
     /// Advance to the next round.  Returns `(next_round_type, duration_secs)`.
@@ -76,6 +120,7 @@ impl SequenceState {
     /// Call this when the engine fires `TimerEvent::Complete`.
     pub fn advance(&mut self, settings: &Settings) -> (RoundType, u32) {
         self.previous_round = Some(self.current_round);
+        let left_work_round = self.current_round == RoundType::Work;
         self.current_round = match self.current_round {
             RoundType::Work => {
                 if self.work_round_number >= self.work_rounds_total {
@@ -110,6 +155,19 @@ impl SequenceState {
             }
         };
 
+        // A completed work round extends the ladder for the rounds that follow.
+        // Counted before the duration is computed so the very next work round
+        // already reflects the increment.
+        if left_work_round {
+            self.work_rounds_completed = self.work_rounds_completed.saturating_add(1);
+        }
+
+        // Leaving a long break (or wrapping the cycle when breaks are disabled)
+        // starts a fresh ladder from the base duration.
+        if self.current_round == RoundType::Work && self.work_round_number == 1 {
+            self.work_rounds_completed = 0;
+        }
+
         // Increment the session counter every time we enter a new Work round.
         if self.current_round == RoundType::Work {
             self.session_work_count += 1;
@@ -125,6 +183,7 @@ impl SequenceState {
         self.previous_round = None;
         self.work_round_number = 1;
         self.session_work_count = 1;
+        self.work_rounds_completed = 0;
     }
 }
 
@@ -445,5 +504,161 @@ mod tests {
         let (rt, _) = seq.advance(&s);
         assert_eq!(rt, RoundType::Work);
         assert_eq!(seq.work_round_number, 1, "counter resets to 1");
+    }
+
+    // -----------------------------------------------------------------------
+    // Incremental focus mode
+    // -----------------------------------------------------------------------
+
+    /// Settings with incremental focus enabled: 5 min base, +5 min per round, 20 min cap.
+    fn incremental_settings() -> Settings {
+        Settings {
+            time_work_secs: 5 * 60,
+            time_short_break_secs: 5 * 60,
+            time_long_break_secs: 15 * 60,
+            long_break_interval: 4,
+            incremental_work_enabled: true,
+            time_work_increment_secs: 5 * 60,
+            time_work_max_secs: 20 * 60,
+            ..Settings::default()
+        }
+    }
+
+    #[test]
+    fn incremental_disabled_keeps_flat_duration() {
+        let s = Settings {
+            time_work_secs: 5 * 60,
+            time_short_break_secs: 5 * 60,
+            time_long_break_secs: 15 * 60,
+            long_break_interval: 2,
+            incremental_work_enabled: false,
+            time_work_increment_secs: 5 * 60,
+            time_work_max_secs: 20 * 60,
+            ..Settings::default()
+        };
+        let mut seq = SequenceState::new(2);
+
+        assert_eq!(seq.current_duration_secs(&s), 5 * 60);
+        for _ in 0..6 {
+            let (rt, dur) = seq.advance(&s);
+            if rt == RoundType::Work {
+                assert_eq!(dur, 5 * 60, "work duration must stay flat when the feature is off");
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_escalates_work_rounds_and_caps() {
+        let s = incremental_settings();
+        let mut seq = SequenceState::new(6);
+
+        // Round 1 starts at the base duration.
+        assert_eq!(seq.current_duration_secs(&s), 300, "first round is the base duration");
+
+        // Each Work round is 5 min longer than the previous, until the 20 min cap.
+        let expected_work = [300u32, 600, 900, 1200, 1200, 1200];
+        for (i, want) in expected_work.iter().enumerate() {
+            if i > 0 {
+                // Advance Work → ShortBreak → Work.
+                let (rt, dur) = seq.advance(&s);
+                assert_eq!(rt, RoundType::ShortBreak);
+                assert_eq!(dur, 300, "break durations are never escalated");
+                seq.advance(&s);
+            }
+            assert_eq!(
+                seq.current_round,
+                RoundType::Work,
+                "step {i}: expected to be on a work round"
+            );
+            assert_eq!(
+                seq.current_duration_secs(&s),
+                *want,
+                "step {i}: unexpected work duration"
+            );
+        }
+    }
+
+    #[test]
+    fn incremental_ladder_resets_after_long_break() {
+        let s = incremental_settings();
+        let mut seq = SequenceState::new(2);
+
+        assert_eq!(seq.current_duration_secs(&s), 300);
+
+        seq.advance(&s); // → ShortBreak
+        let (rt, dur) = seq.advance(&s);
+        assert_eq!(rt, RoundType::Work);
+        assert_eq!(dur, 600, "second work round gains one increment");
+
+        let (rt, _dur) = seq.advance(&s);
+        assert_eq!(rt, RoundType::LongBreak, "long break at the cycle boundary");
+        assert_eq!(seq.work_rounds_completed, 2);
+
+        let (rt, dur) = seq.advance(&s);
+        assert_eq!(rt, RoundType::Work);
+        assert_eq!(dur, 300, "a new cycle restarts at the base duration");
+        assert_eq!(seq.work_rounds_completed, 0, "ladder resets at the cycle boundary");
+    }
+
+    #[test]
+    fn incremental_ladder_resets_on_manual_reset() {
+        let s = incremental_settings();
+        let mut seq = SequenceState::new(8);
+
+        seq.advance(&s); // → ShortBreak
+        seq.advance(&s); // → Work (600s)
+        assert_eq!(seq.current_duration_secs(&s), 600);
+
+        seq.reset();
+        assert_eq!(seq.work_rounds_completed, 0);
+        assert_eq!(seq.current_duration_secs(&s), 300, "reset returns to the base duration");
+    }
+
+    #[test]
+    fn incremental_never_shrinks_below_base_when_cap_is_smaller() {
+        let s = Settings {
+            time_work_secs: 25 * 60,
+            incremental_work_enabled: true,
+            time_work_increment_secs: 5 * 60,
+            time_work_max_secs: 10 * 60, // misconfigured: cap below the base
+            long_break_interval: 4,
+            ..Settings::default()
+        };
+        let seq = SequenceState::new(4);
+        assert_eq!(
+            seq.current_duration_secs(&s),
+            25 * 60,
+            "cap below the base duration must not shorten the work round"
+        );
+    }
+
+    #[test]
+    fn incremental_steps_and_cap_flags_track_the_ladder() {
+        let s = incremental_settings();
+        let mut seq = SequenceState::new(5);
+
+        assert_eq!(seq.work_increment_steps(&s), 0);
+        assert!(!seq.work_duration_at_cap(&s));
+
+        // Work(1)→SB→Work(2)→SB→Work(3)→SB→Work(4)→SB→Work(5)→Long → Work(1)
+        // — a full cycle, which restarts the ladder.
+        for _ in 0..10 {
+            seq.advance(&s);
+        }
+        assert_eq!(seq.current_round, RoundType::Work);
+        assert_eq!(seq.work_round_number, 1, "back at the start of a new cycle");
+        assert_eq!(seq.work_increment_steps(&s), 0, "ladder restarts each cycle");
+        assert!(!seq.work_duration_at_cap(&s));
+        assert_eq!(seq.current_duration_secs(&s), 300);
+
+        // Walk part-way into the next cycle and confirm the cap has engaged.
+        for _ in 0..3 {
+            seq.advance(&s); // Work(2) → SB → Work(3) → SB → Work(4)
+            seq.advance(&s);
+        }
+        assert_eq!(seq.current_round, RoundType::ShortBreak);
+        assert_eq!(seq.work_increment_steps(&s), 3);
+        assert!(seq.work_duration_at_cap(&s), "900 + 300×3 is past the 1200 s cap");
+        assert_eq!(seq.work_duration_secs(&s), 1200);
     }
 }

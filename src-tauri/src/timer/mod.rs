@@ -38,6 +38,18 @@ pub struct TimerSnapshot {
     /// Monotonically-increasing focus round count since last reset. Used as a
     /// session counter when long breaks are disabled.
     pub session_work_count: u32,
+    /// Incremental focus mode: whether the escalating ladder is active.
+    pub incremental_work_enabled: bool,
+    /// The base (un-escalated) work duration from settings, in seconds.
+    pub base_work_secs: u32,
+    /// Seconds added to the work duration per completed work round.
+    pub work_increment_secs: u32,
+    /// Escalation ceiling for the work duration in seconds.
+    pub work_max_secs: u32,
+    /// How many increments are currently applied to the work duration.
+    pub increment_steps: u32,
+    /// True when the work duration has reached the configured ceiling.
+    pub at_increment_cap: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +205,12 @@ impl TimerController {
             work_round_number: seq.work_round_number,
             work_rounds_total: seq.work_rounds_total,
             session_work_count: seq.session_work_count,
+            incremental_work_enabled: settings.incremental_work_enabled,
+            base_work_secs: settings.time_work_secs,
+            work_increment_secs: settings.time_work_increment_secs,
+            work_max_secs: settings.time_work_max_secs,
+            increment_steps: seq.work_increment_steps(&settings),
+            at_increment_cap: seq.work_duration_at_cap(&settings),
         }
     }
 
@@ -515,5 +533,11 @@ fn build_snapshot(
         work_round_number: seq.work_round_number,
         work_rounds_total: seq.work_rounds_total,
         session_work_count: seq.session_work_count,
+        incremental_work_enabled: s.incremental_work_enabled,
+        base_work_secs: s.time_work_secs,
+        work_increment_secs: s.time_work_increment_secs,
+        work_max_secs: s.time_work_max_secs,
+        increment_steps: seq.work_increment_steps(&s),
+        at_increment_cap: seq.work_duration_at_cap(&s),
     }
 }
